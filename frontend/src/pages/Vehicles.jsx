@@ -1,0 +1,37 @@
+import { useMemo, useState } from "react";
+import { Search, Plus, X } from "lucide-react";
+import PageHeader from "../components/PageHeader";
+import StatusBadge from "../components/StatusBadge";
+import { useFleet } from "../context/FleetContext";
+import { api, getErrorMessage } from "../services/api";
+
+export default function Vehicles() {
+  const { vehicles, refresh, loading } = useFleet();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selected, setSelected] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ vehicle_number: "", model: "VoltRunner E2", status: "idle" });
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const filtered = useMemo(() => vehicles.filter((vehicle) => vehicle.vehicle_number.toLowerCase().includes(query.toLowerCase()) && (filter === "all" || vehicle.status === filter)), [vehicles, query, filter]);
+  const createVehicle = async (event) => {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    try { await api.post("/api/vehicles", form); setShowForm(false); setForm({ vehicle_number: "", model: "VoltRunner E2", status: "idle" }); await refresh(); }
+    catch (error) { setMessage(getErrorMessage(error)); }
+    finally { setBusy(false); }
+  };
+  return <>
+    <PageHeader title="Vehicle management" description="Review the fixed 50-vehicle simulated fleet and current telemetry." action={<button className="primary-button" disabled={loading || vehicles.length >= 50} title={vehicles.length >= 50 ? "The simulated fleet is fixed at 50 vehicles." : "Add a vehicle"} onClick={() => setShowForm(true)}><Plus size={16} />{vehicles.length >= 50 ? "Fleet limit reached" : "Add vehicle"}</button>} />
+    <section className="panel fleet-table-panel">
+      <div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by vehicle ID" /></label><div className="filter-tabs">{["all", "active", "idle", "offline"].map((item) => <button key={item} className={filter === item ? "selected" : ""} onClick={() => setFilter(item)}>{item === "all" ? "All vehicles" : item}</button>)}</div><span className="result-count">{filtered.length} vehicles</span></div>
+      <div className="table-scroll"><table><thead><tr><th>Vehicle</th><th>Status</th><th>Health score</th><th>Battery</th><th>Speed</th><th>Temperature</th><th>Voltage</th><th>Last updated</th><th></th></tr></thead><tbody>
+        {filtered.map((vehicle) => { const data = vehicle.latest_telemetry; return <tr key={vehicle.id} onClick={() => setSelected(vehicle)} className="clickable-row"><td><strong>{vehicle.vehicle_number}</strong><small className="cell-subtitle">{vehicle.model}</small></td><td><StatusBadge status={vehicle.status} /></td><td><span className={`health-indicator ${vehicle.health_score >= 70 ? "healthy" : vehicle.health_score === null ? "" : "attention"}`}><i />{vehicle.health_score ?? "—"}{vehicle.health_score !== null ? "/100" : ""}</span></td><td>{data ? <span className={data.battery_percentage < 20 ? "text-danger" : ""}>{data.battery_percentage.toFixed(1)}%</span> : "—"}</td><td>{data ? `${data.speed.toFixed(1)} km/h` : "—"}</td><td>{data ? `${data.battery_temperature.toFixed(1)}°C` : "—"}</td><td>{data ? `${data.voltage.toFixed(1)} V` : "—"}</td><td>{data ? new Date(data.timestamp).toLocaleTimeString() : "No data"}</td><td><button className="table-action" onClick={(event) => { event.stopPropagation(); setSelected(vehicle); }}>Details</button></td></tr>; })}
+        {!filtered.length && <tr><td colSpan="9" className="empty-table">{loading ? "Loading fleet vehicles…" : "No vehicles match this filter."}</td></tr>}
+      </tbody></table></div>
+    </section>
+    {selected && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}><section className="modal-card"><button className="modal-close" onClick={() => setSelected(null)}><X size={18} /></button><div className="modal-title"><span className="vehicle-mini-icon"><Search size={16} /></span><div><h2>{selected.vehicle_number}</h2><p>{selected.model}</p></div><StatusBadge status={selected.status} /></div><div className="detail-metrics">{[["Battery", selected.latest_telemetry ? `${selected.latest_telemetry.battery_percentage.toFixed(1)}%` : "No data"], ["Speed", selected.latest_telemetry ? `${selected.latest_telemetry.speed.toFixed(1)} km/h` : "—"], ["Temperature", selected.latest_telemetry ? `${selected.latest_telemetry.battery_temperature.toFixed(1)}°C` : "—"], ["Voltage", selected.latest_telemetry ? `${selected.latest_telemetry.voltage.toFixed(1)} V` : "—"]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><p className="modal-footnote">Vehicle coordinates and telemetry are generated by the local simulator.</p></section></div>}
+    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal-card form-modal" onSubmit={createVehicle}><button type="button" className="modal-close" onClick={() => setShowForm(false)}><X size={18} /></button><h2>Add fleet vehicle</h2><p>Create a vehicle record for tracking and telemetry ingestion.</p>{message && <div className="inline-error">{message}</div>}<label>Vehicle ID<input required minLength="2" maxLength="32" pattern="[A-Za-z0-9-]+" value={form.vehicle_number} onChange={(event) => setForm({ ...form, vehicle_number: event.target.value })} placeholder="EV-051" /></label><label>Vehicle model<input required value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} /></label><label>Initial status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value="idle">Idle</option><option value="active">Active</option><option value="offline">Offline</option></select></label><button className="primary-button full-width" disabled={busy}>{busy ? "Creating…" : "Create vehicle"}</button></form></div>}
+  </>;
+}
